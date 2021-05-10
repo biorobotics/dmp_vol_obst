@@ -1,0 +1,3 @@
+[submodule "wombat_arm_fk_and_singularity"]
+	path = wombat_arm_fk_and_singularity
+	url = ./wombat_arm_fk_and_singularity/

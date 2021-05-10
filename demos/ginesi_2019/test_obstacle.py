@@ -55,7 +55,8 @@ def genPrimitive():
 		r=0.3
 		primitive[i,:]=np.array([0,#-r*i/100.,
 								-r*i/100.,
-								0.6+0.1*np.sin(np.pi*i/100.)])
+								0.6])
+								#0.6+0.1*np.sin(np.pi*i/100.)])
 	return primitive
 def genPrimitiveQ():
 	n=100
@@ -144,17 +145,17 @@ class dmp_server:
 			#something that fits a superquadric function for given shape
 			#TODO: dont hardcode this to mug
 			dim=np.array([0.045,0.044,0.055])*1.3
-			pos=np.array([obj.mesh_poses[0].position.x,
-						obj.mesh_poses[0].position.y,
-						obj.mesh_poses[0].position.z])
-			'''
+			#pos=np.array([obj.mesh_poses[0].position.x,
+			#			obj.mesh_poses[0].position.y,
+			#			obj.mesh_poses[0].position.z])
+			
 			dim=np.array([obj.primitives[0].dimensions[0],
 						  obj.primitives[0].dimensions[1],
 						  obj.primitives[0].dimensions[2]])
 			pos=np.array([obj.primitive_poses[0].position.x,
 						  obj.primitive_poses[0].position.y,
 						  obj.primitive_poses[0].position.z])
-			'''
+			
 			#TODO: don't hardcode this and instead find a way to determine
 			#the actual pose from the message
 			posMat=np.array([[1.0,0.0,0.0,pos[0]],
@@ -226,29 +227,37 @@ class dmp_server:
 	def intermediate_point_force(self,pose,obst_i):
 		#return np.zeros(3)
 		points=self.calc_arm_points(pose)
-		best_F=np.zeros(3)
-		best_F_mag=0.0
-		best_arm=0
-		best_point=np.zeros(3)
+		best_F=np.zeros((3,3))
+		best_F_mag=[0.0,0.0,0.0]
+		best_arm=[0,0,0]
+		best_point=np.zeros((3,3))
+		#iterate over each arm
 		for arm in range(3):
+			#iterate over points w/in an arm
 			for point_i in range(self.num_line_points):
 				point=points[arm,point_i,:]
 				point_F=self.obstacles[obst_i].F_sq(point)
 				point_F_mag=np.linalg.norm(point_F)
-				if (best_F_mag<point_F_mag):
-					best_F=point_F
-					best_F_mag=point_F_mag
-					best_arm=arm
-					best_point=point
+				if (best_F_mag[arm]<point_F_mag):
+					best_F[arm,:]=point_F
+					best_F_mag[arm]=point_F_mag
+					best_arm[arm]=arm
+					best_point[arm,:]=point
 		#scale the highest force so that it proportionally 
 		#pushes the ee
 		#TODO: find better approximation
-		ee_dist=np.linalg.norm(pose[0:3]-self.base_positions[best_arm])
-		p_dist=np.linalg.norm(best_point-self.base_positions[best_arm])
-		print("ee pos:",pose[0:3])
-		print("point :",best_point)
-		print("scaled F:",best_F*ee_dist/p_dist)
-		return best_F*ee_dist/p_dist
+		dbase=np.repeat([pose[0:3]],3,axis=0)-self.base_positions
+		ee_dists=np.linalg.norm(dbase,axis=1)
+		p_dists=np.linalg.norm(best_point-self.base_positions,axis=1)
+		#sum all 3 arm's forces together
+		return np.sum(best_F*(ee_dists/p_dists))
+		#return best_F*(ee_dists/p_dists)
+		#ee_dist=np.linalg.norm(pose[0:3]-self.base_positions[best_arm])
+		#p_dist=np.linalg.norm(best_point-self.base_positions[best_arm])
+		#print("ee pos:",pose[0:3])
+		#print("point :",best_point)
+		#print("scaled F:",best_F*ee_dist/p_dist)
+		#return best_F*ee_dist/p_dist
 
 		#add ee force and highest arm force to the sum
 	#calculates static obstacle forces. TODO: try dynamic(incorporate v?)
