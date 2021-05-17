@@ -53,10 +53,11 @@ def genPrimitive():
 		#quat=[1,0,0,0]
 		#r=0.01
 		r=0.3
-		primitive[i,:]=np.array([0,#-r*i/100.,
-								-r*i/100.,
-								0.6])
-								#0.6+0.1*np.sin(np.pi*i/100.)])
+		#primitive[i,:]=np.array([-r*i/100.,
+		#						-r*i/100.,
+		#						0.6+0.1*np.sin(np.pi*i/100.)])
+		primitive[i,:]=np.array([0.,0.,0.6])
+
 	return primitive
 def genPrimitiveQ():
 	n=100
@@ -69,11 +70,15 @@ def genPrimitiveQ():
 	#primitive=np.block([qpath[:,3:4],qpath[:,0:3]])
 	primitive=np.zeros((n,4))
 	for i in range(n):
-		Ri=R.from_euler('zyx',[0,0,0],degrees=False)
+		rx=(np.pi/200)*i/(50.)
+		if i>=50:
+			rx=(np.pi/200)*(99-i)/(50.)
+		Ri=R.from_euler('zyx',[0,0,rx],degrees=False)
 		qi=Ri.as_quat()
 		primitive[i,0]=qi[3]
 		primitive[i,1:4]=qi[0:3]
-		print(primitive[i])
+		#print(primitive[i])
+		print(rx)
 	return primitive
 	 
 #defined 
@@ -101,7 +106,7 @@ class dmp_server:
 		self.dmp=dmp_cartesian.DMPs_cartesian(n_dmps=num_dmps,n_bfs=num_bfs,K=K_val,dt=dtime,alpha_s=a_s,tol=tolerance)	
 		self.dmp.imitate_path(x_des=self.primitive)
 		#quaternion DMP
-		self.qdmp=dmp_quaternion.DMPs_quaternion(n_bfs=num_bfs,K=48,dt=dtime,alpha_s=a_s,tol=tolerance)
+		self.qdmp=dmp_quaternion.DMPs_quaternion(n_bfs=num_bfs+500,K=48,dt=dtime,alpha_s=a_s,tol=tolerance)
 		self.qdmp.imitate_path(q_des=self.qprimitive)
 		#list to hold all obstacles
 		self.obstacles=[]
@@ -378,7 +383,7 @@ class dmp_server:
 			#	f=forces_fxn(x_track_s,x_track_s)
 			#simulate quaternion DMP with no forces. TODO: add forces
 			q_track_s,eta_track_s,deta_track_s=self.qdmp.step(
-					external_force=None,adapt=False)
+					external_force=None,adapt=False,pos=copy.deepcopy(x_track_s))
 			
 			path=np.append(path,[x_track_s],axis=0)
 			dx_track=np.append(dx_track,[dx_track_s],axis=0)
@@ -391,9 +396,9 @@ class dmp_server:
 			deta_track=np.append(deta_track,[deta_track_s],axis=0)
 			self.qdmp.t+=1
 			qflag=(np.linalg.norm(q_track_s-self.qdmp.q_goal)<=self.qdmp.tol)
-			print("cartesian flag:",flag,", quaternion flag:",qflag)
-			print("cartesian state:",x_track_s,", goal:",self.dmp.x_goal)
-			print("quaternion state:",q_track_s,", goal:",self.qdmp.q_goal)
+			#print("cartesian flag:",flag,", quaternion flag:",qflag)
+			#print("cartesian state:",x_track_s,", goal:",self.dmp.x_goal)
+			#print("quaternion state:",q_track_s,", goal:",self.qdmp.q_goal)
 
 		"""
 		self.dmp.reset_state()

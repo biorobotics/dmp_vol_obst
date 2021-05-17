@@ -28,6 +28,9 @@ from dmp.cs import CanonicalSystem
 from dmp.exponential_integration import exp_eul_step
 from dmp.exponential_integration import phi1
 from dmp.derivative_matrices import compute_D1, compute_D2
+from wombat_arm_fk_and_singularity import invK
+from wombat_arm_fk_and_singularity import final_FK
+from wombat_arm_fk_and_singularity import condition_no
 
 # ---------------------------------------------------------------------------- #
 # quaternion DMPs in Cartesian Space
@@ -110,6 +113,10 @@ class DMPs_quaternion(object):
 		alpha_s float: constant of the Canonical System
 		basis string : type of basis functions
 		'''
+		#surya singularity stuff
+		self.sx=0.2
+		self.sy=0.2
+		self.sz=0.2
 		#az=bz*4, bz=12-> bz*bz*4, bz*4
 		# Tolerance for the accuracy of the movement: the trajectory will stop
 		# when || x - g || <= tol
@@ -392,6 +399,9 @@ class DMPs_quaternion(object):
 		self.eta = v0
 		self.deta = np.zeros(3)
 		self.cs.reset_state()
+		self.sx=0.2
+		self.sy=0.2
+		self.sz=0.2
 
 	def rollout(self, tau = 1.0, v0 = None, **kwargs):
 		'''
@@ -457,7 +467,7 @@ class DMPs_quaternion(object):
 		return q_track, eta_track, deta_track, t_track
 
 	def step(self, tau = 1.0, error = 0.0, external_force = None,
-		adapt=False, tols=None, **kwargs):
+		adapt=False, tols=None, pos=None,**kwargs):
 		'''
 		Run the DMP system for a single timestep.
 		  tau float: time rescaling constant
@@ -494,7 +504,7 @@ class DMPs_quaternion(object):
 		#TODO: check the Do_diag multiplication term
 		#deta=self.K*2*logterm - self.D*self.eta+f*Do_diag
 		#print("printing terms of deta.")
-		
+
 		deta=self.K*2*logterm-self.D*self.eta-self.K*Do_diag*self.cs.s+self.K*f
 		#print("eta:",self.eta)
 		#print("f:",f)
@@ -503,13 +513,38 @@ class DMPs_quaternion(object):
 		#add external forces
 		if external_force is not None:
 			deta=deta+external_force(self.q,self.eta)/tau
+		if pos is not None and len(pos)==3:
+		#add singularity avoidance
+			homing_pos=np.array([1,0,0,0])
+			sing_logterm=2*quat_log(quat_mul(homing_pos,q_inv))
+			sing_deta_term=self.K*2*sing_logterm
+			#check condition number to scale this
+
+			#TODO: integrate with cartesian DMP so that this doesn't need to be run
+			current_R=R.from_quat(self.q)
+			eul_angs=current_R.as_euler('zyx',degrees=False)
+			curr_j=np.array([pos[0],pos[1],pos[2],
+							eul_angs[2],eul_angs[1],eul_angs[0]])
+			#solve for joint angles using IK
+			j_actual_real,valid=invK.invK(curr_j)
+			placeholder,solX,solY,solZ,all_joints=final_FK.fk_plot(
+				j_actual_real.flatten(),self.sx,self.sy,self.sz,self.cs.dt)
+			self.sx=solX;
+			self.sy=solY;
+			self.sz=solZ;
+			cond_num=condition_no.cond_no(np.array(all_joints))
+			cond_mod=max(np.log(cond_num)-6,0.0)
+			print("condition mod=",cond_mod)
+			#add the singularity avoidance term to the system acceleration
+			deta=deta+2.2*cond_mod*sing_deta_term	
+		
 		eta=self.eta+deta*tau*self.cs.dt
 		quat_exp_term=self.cs.dt*eta/(2*tau)
-		print("quat exp term inner",quat_exp_term)
-		print("quat exp term:",quat_exp(quat_exp_term))
-		print("self.q:",self.q)
+		#print("quat exp term inner",quat_exp_term)
+		#print("quat exp term:",quat_exp(quat_exp_term))
+		#print("self.q:",self.q)
 		q=quat_mul(quat_exp(quat_exp_term),self.q)
-		print("resulting self.q:",q)
+		#print("resulting self.q:",q)
 		self.q=q
 		self.eta=eta
 		self.deta=deta
@@ -519,61 +554,3 @@ class DMPs_quaternion(object):
 		return self.q,self.eta,self.deta
 
 
-		#old implementation, is skipped
-		alpha_tilde = - self.cs.alpha_s / tau / error_coupling
-		# State definition. TODO: replace with quaternion state
-		state = np.zeros(2 * self.n_dmps)
-		state[0::2] = self.dx
-		state[1::2] = self.x
-		# Linear part of the dynamical system. TODO: replace
-		A_m = self.linear_part / tau
-		# s-dep part of the dynamical system
-		def beta_s(s, x, v):
-			psi = self.gen_psi(s)
-			#forcing fxn. TODO: replace with quaternion forcing fxn
-			f = (np.dot(self.w, psi[:, 0])) / (np.sum(psi[:, 0])) * self.cs.s
-			f = np.nan_to_num(f)
-			out = np.zeros(2 * self.n_dmps)
-			out[0::2] = self.K * (self.x_goal * (1.0 - s) + self.x_0 * s + f)
-			#other forcing fxns to be added. TODO: add a rotation-based obstacle for this
-			if external_force is not None:
-				out[0::2] += external_force(x, v)
-			return out / tau
-		## Initialization of the adaptive step
-		flag_tol = False
-		while not flag_tol:
-			# Bogacki–Shampine method
-			# Defining the canonical system in the time of the scheme
-			s1 = copy.deepcopy(self.cs.s)
-			s2 = s1 * np.exp(-alpha_tilde * self.cs.dt * 1.0/2.0)
-			s3 = s1 * np.exp(-alpha_tilde * self.cs.dt * 3.0/4.0)
-			s4 = s1 * np.exp(-alpha_tilde * self.cs.dt)
-			xi1 = np.dot(A_m, state) + beta_s(s1, state[1::2], state[0::2])
-			xi2 = np.dot(A_m, state + self.cs.dt * xi1 * 1.0/2.0) + \
-				beta_s(s2, state[1::2] + self.cs.dt * xi1[1::2] * 1.0/2.0,
-					state[0::2] + self.cs.dt * xi1[0::2] * 1.0/2.0)
-			xi3 = np.dot(A_m, state + self.cs.dt * xi2 * 3.0/4.0) + \
-				beta_s(s3, state[1::2] + self.cs.dt * xi2[1::2] * 3.0/4.0,
-				state[0::2] + self.cs.dt * xi2[0::2] * 3.0/4.0)
-			xi4 = np.dot(A_m, state + self.cs.dt * (2.0 * xi1 + 3.0 * xi2 + 4.0 * xi3) / 9.0) + \
-				beta_s(s4, state[1::2] + self.cs.dt * (2.0 * xi1[1::2] + 3.0 * xi2[1::2] + 4.0 * xi3[1::2]) / 9.0,
-				state[0::2] + self.cs.dt * (2.0 * xi1[0::2] + 3.0 * xi2[0::2] + 4.0 * xi3[0::2]) / 9.0)
-			y_ord2 = state + self.cs.dt * (2.0 * xi1 + 3.0 * xi2 + 4.0 * xi3) / 9.0
-			y_ord3 = state + self.cs.dt * (7.0 * xi1 + 6.0 * xi2 + 8.0 * xi3 + 3.0 * xi4) / 24.0
-			if (np.linalg.norm(y_ord2 - y_ord3) < tols[0] * np.linalg.norm(state) + tols[1]) or (not adapt):
-				flag_tol = True
-				state = copy.deepcopy(y_ord3)
-			else:
-				self.cs.dt /= 1.1
-		self.cs.step(tau=tau, error_coupling=error_coupling)
-		self.x = copy.deepcopy(state[1::2])
-		self.dx = copy.deepcopy(state[0::2])
-		psi = self.gen_psi(self.cs.s)
-		#forcing fxn. TODO: replace with quaternion forcing fxn
-		f = (np.dot(self.w, psi[:, 0])) / (np.sum(psi[:, 0])) * self.cs.s
-		f = np.nan_to_num(f)
-		self.ddx = (self.K * (self.x_goal - self.x) - self.D * self.dx \
-			- self.K * (self.x_goal - self.x_0) * self.cs.s + self.K * f) / tau
-		if external_force is not None:
-			self.ddx += external_force(self.x, self.dx) / tau
-		return self.x, self.dx, self.ddx

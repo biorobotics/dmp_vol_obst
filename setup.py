@@ -6,4 +6,4 @@ setup(name='dmp',
       author='Michele Ginesi',
       author_email='michele.ginesi@univr.it',
       install_requires=['numpy', 'scipy', 'matplotlib'],
-      packages=['dmp'])
+      packages=['dmp', 'wombat_arm_fk_and_singularity'])
