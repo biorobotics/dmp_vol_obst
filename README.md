@@ -1,4 +1,8 @@
 # README #
+This repo is code largely taken from the below work by M. Ginesi et al.; please see their implementation at https://github.com/mginesi/dmp_vol_obst. The code has been modified to include interacting with ROS to recieve start/goal positions, rudimentary singularity avoidance for the d3 robot, and to include planning for a path w.r.t orientation. 
+
+
+The rest of the README is the original README from the repo this was based on.
 
 This repository contains the implementation of Dynamic Movement Primitives (DMPs), together with different approaches to obstacle avoidance, in Python 3.5.
 
